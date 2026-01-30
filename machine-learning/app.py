@@ -240,31 +240,6 @@ def predict_risk(patient: PatientData):
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
-@app.post("/batch-predict")
-def batch_predict(patients: list[PatientData]):
-    """
-    Predicts risk for multiple patients at once.
-    """
-    if model is None:
-        raise HTTPException(
-            status_code=503,
-            detail="ML model not loaded. Please run train_model.py first",
-        )
-
-    try:
-        predictions = []
-        for patient in patients:
-            prediction = predict_risk(patient)
-            predictions.append(prediction)
-
-        return {"count": len(predictions), "predictions": predictions}
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Batch prediction failed: {str(e)}"
-        )
-
-
 if __name__ == "__main__":
     import uvicorn
 
