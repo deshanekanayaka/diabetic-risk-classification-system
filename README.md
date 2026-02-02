@@ -4,7 +4,7 @@
 
 ## Introduction
 
-The **Diabetic Risk Classification System** is a web-based clinical decision support tool designed to help healthcare providers efficiently manage and prioritize diabetic patients based on their clinical risk factors. The system leverages machine learning algorithms to automatically assess patient health indicators and categorize them into risk levels (Low, Medium, High), enabling clinicians to identify high-priority cases and provide timely interventions.
+The **Diabetic Risk Classification System** is a web-based clinical decision support tool designed to help healthcare providers efficiently manage and prioritize diabetic patients based on their clinical risk factors. The system leverages the Random Forest classification to automatically assess patient health indicators and categorize them into risk levels (Low, Medium, High), enabling clinicians to identify high-priority cases and provide timely interventions.
 
 By integrating automated risk scoring with an intuitive dashboard interface, the system streamlines patient management workflows and supports better health outcomes through data-driven prioritization.
 
