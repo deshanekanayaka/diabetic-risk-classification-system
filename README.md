@@ -44,8 +44,8 @@ By integrating automated risk scoring with an intuitive dashboard interface, the
 - **Multi-user Support** - Concurrent user access without performance degradation
 
 ### Machine Learning Features
-- **Automated Risk Scoring** - ML-powered classification on a 0-100 scale
 - **Random Forest Model** - Trained on historical patient data for accurate risk prediction
+- **Automated Risk Scoring** - ML-powered classification on a 0-100 scale
 - **Multi-factor Analysis** - Evaluates 14+ clinical indicators including:
   - HbA1c (Glycated Hemoglobin)
   - BMI (Body Mass Index)
