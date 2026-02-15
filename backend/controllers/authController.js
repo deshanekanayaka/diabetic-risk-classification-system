@@ -11,10 +11,10 @@ const db = require('../config/database');
 async function signup(req, res) {
     console.log('Signup Function')
   try {
-    const { full_name, email, password } = req.body;
+    const { name, email, password } = req.body;
 
     // Check if all required fields are present
-    if (!full_name || !email || !password) {
+    if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
         message: 'All fields are required',
@@ -67,8 +67,8 @@ async function signup(req, res) {
 
     // Insert new clinician into database
     const result = await db.execute(
-      'INSERT INTO clinicians (full_name, email, password) VALUES (?, ?, ?)',
-      [full_name, email, hashedPassword]
+      'INSERT INTO clinicians (name, email, password) VALUES (?, ?, ?)',
+      [name, email, hashedPassword]
     );
 
     if (!result.success) {
@@ -88,7 +88,7 @@ async function signup(req, res) {
       message: 'Account created successfully!',
       clinician: {
         clinician_id: newClinicianId,
-        full_name: full_name,
+        name: name,
         email: email
       }
     });
@@ -152,7 +152,7 @@ async function login(req, res) {
       message: 'Login successful!',
       clinician: {
         clinician_id: clinician.clinician_id,
-        full_name: clinician.full_name,
+        name: clinician.name,
         email: clinician.email
       }
     });
