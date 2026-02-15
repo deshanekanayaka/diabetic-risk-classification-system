@@ -1,22 +1,30 @@
 -- seed.sql
 -- Sample data for Diabetic Risk Classification System
 USE diabetic_db;
+-- Clean slate: delete in correct order (children first, then parents)
+DELETE FROM patients;
+DELETE FROM clinicians;
+-- Reset auto-increment IDs (optional but clean)
+ALTER TABLE patients AUTO_INCREMENT = 1;
+ALTER TABLE clinicians AUTO_INCREMENT = 1;
+-- Insert clinicians with PROPER bcrypt hashes
 INSERT INTO clinicians (full_name, email, password)
 VALUES (
         'Sarah Johnson',
         'sarah.johnson@hospital.com',
-        'hashed_password_123'
+        '$2b$10$hqJYYPuW1cpM5oLJRKnPL.w4UimhZMyi6yY9RMHKPO3nXrSpbQy3m'
     ),
     (
         'Michael Chen',
         'michael.chen@hospital.com',
-        'hashed_password_456'
+        '$2b$10$iq2P6nP6obkpxUNlRD4LuOfsZvgj3vf3.vknkEh.kaCpveaV2qsD.'
     ),
     (
         'Emily Davis',
         'emily.davis@hospital.com',
-        'hashed_password_789'
+        '$2b$10$omTg4eZAEN9ppwEh1oMTIOhcG/trJoIALNqyODJLi27XfplNpDuyu'
     );
+-- Insert patients (same as before)
 INSERT INTO patients (
         age,
         sex,
@@ -131,7 +139,9 @@ VALUES (
         'medium',
         3
     );
+SELECT 'Clinicians seeded:' as '';
 SELECT *
 FROM clinicians;
+SELECT 'Patients seeded:' as '';
 SELECT *
 FROM patients;
