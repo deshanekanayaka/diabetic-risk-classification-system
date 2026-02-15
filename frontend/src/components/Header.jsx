@@ -8,7 +8,7 @@ const Header = () => {
   return (
     <div className="header">
       <div className="header-left">
-        <div className="header-title">Diabetic Risk Classification System</div>
+        <div className="header-title">Diabetic Patient Priority System</div>
       </div>
       
       {/* Navigation Links */}
