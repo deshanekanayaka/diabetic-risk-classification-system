@@ -1,123 +1,158 @@
-"""
-Random Forest Model Training Script
-Trains the diabetic patient risk assessment model using point-based risk calculation
-Run: python3 train_model.py
-"""
-
-import pandas as pd
 import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import confusion_matrix, accuracy_score, classification_report
+from sklearn.model_selection import GridSearchCV
 import pickle
 import os
 
 
 def load_and_preprocess_data(csv_path):
     """
-    Loads and prepares the diabetes dataset for training.
+    Loads and prepares the diabetes dataset.
     """
-    print("Loading diabetes dataset")
+    print("STEP 1: LOADING AND PREPROCESSING DATA")
+
+    # Load data
     df = pd.read_csv(csv_path)
     print(f"Loaded {len(df)} patient records")
 
-    print("Processing Blood Pressure column")
-    bp_split = df["BP"].astype(str).str.split("/", expand=True)
+    # Basic cleaning
+    df = df.drop(columns=["Unnamed: 0", "FBS"])
+    df.columns = df.columns.str.strip()
+    df = df.rename(
+        columns={
+            "Fiamly \n1)father\n2) mather \n3)uncle(mother's side)\n4)uncle(father's side)": "Family_History"
+        }
+    )
+
+    # Process Age
+    df["Age"] = df["Age"].str.replace("Years", "").str.replace("Year", "").str.strip()
+    df["Age"] = pd.to_numeric(df["Age"], errors="coerce")
+
+    # Process Blood Pressure
+    bp_split = df["BP"].str.split("/", expand=True)
     df["BP_Systolic"] = pd.to_numeric(bp_split[0], errors="coerce")
     df["BP_Diastolic"] = pd.to_numeric(bp_split[1], errors="coerce")
 
-    bp_sys_missing = df["BP_Systolic"].isna().sum()
-    bp_dia_missing = df["BP_Diastolic"].isna().sum()
-    if bp_sys_missing > 0 or bp_dia_missing > 0:
-        print(
-            f"   Found {bp_sys_missing} missing Systolic BP and {bp_dia_missing} missing Diastolic BP values"
-        )
-        df["BP_Systolic"] = df["BP_Systolic"].fillna(df["BP_Systolic"].median())
-        df["BP_Diastolic"] = df["BP_Diastolic"].fillna(df["BP_Diastolic"].median())
+    # Convert BMI
+    df["BMI"] = pd.to_numeric(df["BMI"], errors="coerce")
 
-    print("Processing Age column")
-    df["Age"] = (
-        df["Age"]
-        .astype(str)
-        .str.upper()
-        .str.replace("YEARS", "")
-        .str.replace("YEAR", "")
-        .str.strip()
-    )
-    df["Age"] = pd.to_numeric(df["Age"], errors="coerce")
+    # Fill missing values with median
+    for col in ["Age", "BP_Systolic", "BP_Diastolic", "BMI", "RBS"]:
+        df[col] = df[col].fillna(df[col].median())
 
-    age_missing = df["Age"].isna().sum()
-    if age_missing > 0:
-        print(f"   Found {age_missing} missing Age values, filling with median")
-        df["Age"] = df["Age"].fillna(df["Age"].median())
+    # Encode categorical variables
+    df["Sex_Encoded"] = df["Sex"].map({"MALE": 1, "FEMALE": 0})
 
-    df["Age"] = df["Age"].astype(int)
-
-    print("Encoding categorical variables")
-    df["Sex_Encoded"] = df["Sex"].apply(lambda x: 1 if x == "MALE" else 0)
-
-    print("Handling missing values in numeric columns")
-
-    df["RBS"] = pd.to_numeric(df["RBS"], errors="coerce")
-    df["FBS"] = pd.to_numeric(df["FBS"], errors="coerce")
-    df["RBS"] = df["RBS"].fillna(df["FBS"])
-
-    numeric_columns = ["HbA1c", "BMI", "BP_Systolic", "BP_Diastolic", "RBS"]
-
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-            missing_count = df[col].isna().sum()
-            if missing_count > 0:
-                print(f"   {col}: {missing_count} missing values, filling with median")
-            df[col] = df[col].fillna(df[col].median())
-
-    print("Creating risk categories using point-based system")
-
-    def calculate_risk_level(row):
-        """
-        Point-based medical risk assessment for 5 health indicators.
-
-        Points: HbA1c (0-40) + RBS (0-20) + BMI (0-15) + BP (0-15) + Age (0-10)
-        Categories: Low (0-33), Medium (34-66), High (67-100)
-        """
-        points = 0
-
-        if row["HbA1c"] >= 6.5:
-            points += 40
-        elif row["HbA1c"] >= 5.7:
-            points += 20
-
-        if row["RBS"] >= 200:
-            points += 20
-        elif row["RBS"] >= 140:
-            points += 10
-
-        if row["BMI"] >= 30:
-            points += 15
-        elif row["BMI"] >= 25:
-            points += 8
-
-        if row["BP_Systolic"] >= 140 or row["BP_Diastolic"] >= 90:
-            points += 15
-        elif row["BP_Systolic"] >= 130 or row["BP_Diastolic"] >= 85:
-            points += 8
-
-        if row["Age"] >= 65:
-            points += 10
-        elif row["Age"] >= 45:
-            points += 5
-
-        if points < 34:
-            return 0
-        elif points < 67:
-            return 1
-        else:
-            return 2
-
+    # Create risk categories using helper functions
     df["Risk_Category"] = df.apply(calculate_risk_level, axis=1)
 
-    print("Creating feature matrix")
+    print()
+    print("Data preprocessing complete")
+    print(f"  Risk Distribution:")
+    print(f"    Low Risk:    {(df['Risk_Category'] == 0).sum()} patients")
+    print(f"    Medium Risk: {(df['Risk_Category'] == 1).sum()} patients")
+    print(f"    High Risk:   {(df['Risk_Category'] == 2).sum()} patients")
+
+    return df
+
+
+def get_hba1c_points(hba1c):
+    """
+    Calculate risk points based on HbA1c levels.
+    HbA1c >= 6.5: Diabetic range (40 points)
+    HbA1c >= 5.7: Pre-diabetic range (20 points)
+    """
+    if hba1c >= 6.5:
+        return 40
+    elif hba1c >= 5.7:
+        return 20
+    return 0
+
+
+def get_rbs_points(rbs):
+    """
+    Calculate risk points based on Random Blood Sugar.
+    RBS >= 200: High risk (20 points)
+    RBS >= 140: Elevated (10 points)
+    """
+    if rbs >= 200:
+        return 20
+    elif rbs >= 140:
+        return 10
+    return 0
+
+
+def get_bmi_points(bmi):
+    """
+    Calculate risk points based on Body Mass Index.
+    BMI >= 30: Obese (15 points)
+    BMI >= 25: Overweight (8 points)
+    """
+    if bmi >= 30:
+        return 15
+    elif bmi >= 25:
+        return 8
+    return 0
+
+
+def get_bp_points(systolic, diastolic):
+    """
+    Calculate risk points based on Blood Pressure.
+    Stage 2 Hypertension (140/90): 15 points
+    Stage 1 Hypertension (130/85): 8 points
+    """
+    if systolic >= 140 or diastolic >= 90:
+        return 15
+    elif systolic >= 130 or diastolic >= 85:
+        return 8
+    return 0
+
+
+def get_age_points(age):
+    """
+    Calculate risk points based on age.
+    Age >= 65: Senior (10 points)
+    Age >= 45: Middle-aged (5 points)
+    """
+    if age >= 65:
+        return 10
+    elif age >= 45:
+        return 5
+    return 0
+
+
+def calculate_risk_level(row):
+    """
+    Calculate overall risk category for a patient.
+    Returns: 0 (Low), 1 (Medium), or 2 (High)
+    """
+    # Sum points from all health indicators
+    points = (
+        get_hba1c_points(row["HbA1c"])
+        + get_rbs_points(row["RBS"])
+        + get_bmi_points(row["BMI"])
+        + get_bp_points(row["BP_Systolic"], row["BP_Diastolic"])
+        + get_age_points(row["Age"])
+    )
+
+    # Convert total points to risk category
+    if points < 34:
+        return 0  # Low risk
+    elif points < 67:
+        return 1  # Medium risk
+    else:
+        return 2  # High risk
+
+
+def prepare_features(df):
+    """
+    Prepares feature matrix and target vector.
+    """
+    print()
+    print("STEP 2: PREPARING FEATURES")
 
     feature_columns = [
         "HbA1c",
@@ -128,91 +163,184 @@ def load_and_preprocess_data(csv_path):
         "BMI",
         "RBS",
     ]
-
-    X = df[feature_columns]
+    x = df[feature_columns]
     y = df["Risk_Category"]
 
-    print(f"Features prepared: {len(feature_columns)} features")
-    print("Risk distribution:")
-    print(f"   Low risk: {(y == 0).sum()} patients")
-    print(f"   Medium risk: {(y == 1).sum()} patients")
-    print(f"   High risk: {(y == 2).sum()} patients")
+    print(f"Features: {feature_columns}")
+    print(f"Feature matrix shape: {x.shape}")
 
-    return X, y, df
+    return x, y, feature_columns
 
 
-def train_random_forest(X, y):
+def split_data(x, y):
     """
-    Trains the Random Forest model with 100 decision trees.
+    Splits data into training and testing sets.
     """
-    print("Splitting data into training and testing sets")
+    print()
+    print("STEP 3: SPLITTING DATA")
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+    x_train, x_test, y_train, y_test = train_test_split(
+        x, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    print(f"Training set: {len(X_train)} patients")
-    print(f"Testing set: {len(X_test)} patients")
+    print(f"Training set: {x_train.shape}")
+    print(f"Testing set:  {x_test.shape}")
 
-    print("Training Random Forest model")
+    return x_train, x_test, y_train, y_test
 
-    model = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=None,
-        min_samples_split=2,
-        min_samples_leaf=1,
-        random_state=42,
-        n_jobs=-1,
+
+def fit_and_evaluate_model(
+    x_train,
+    x_test,
+    y_train,
+    y_test,
+    max_depth=5,
+    min_samples_split=0.01,
+    max_features=0.8,
+    max_samples=0.8,
+):
+    """
+    Fits Random Forest model and evaluates performance.
+    """
+    random_forest = RandomForestClassifier(
+        random_state=0,
+        max_depth=max_depth,
+        min_samples_split=min_samples_split,
+        max_features=max_features,
+        max_samples=max_samples,
     )
 
-    model.fit(X_train, y_train)
-    print("Training complete")
+    model = random_forest.fit(x_train, y_train)
+    random_forest_predict = random_forest.predict(x_test)
+    random_forest_conf_matrix = confusion_matrix(y_test, random_forest_predict)
+    random_forest_acc_score = accuracy_score(y_test, random_forest_predict)
 
-    return model, X_train, X_test, y_train, y_test
+    print("Confusion matrix")
+    print(random_forest_conf_matrix)
+    print("\n")
+    print("Accuracy of Random Forest:", random_forest_acc_score * 100, "\n")
+    print(classification_report(y_test, random_forest_predict))
+
+    return model
 
 
-def evaluate_model(model, X_train, X_test, y_train, y_test):
+def hyperparameter_tuning(x_train, y_train):
+    """
+    Performs GridSearchCV to find optimal hyperparameters.
+    """
+    print()
+    print("STEP 5: HYPERPARAMETER TUNING WITH GRIDSEARCHCV")
 
-    print("Evaluating model")
+    # Parameter grid
+    param_grid = [
+        {
+            "max_depth": [3, 5, 7, 10],
+            "min_samples_split": [0.01, 0.03, 0.07, 0.1],
+            "max_features": [0.7, 0.8, 0.9, 1.0],
+            "max_samples": [0.7, 0.8, 0.9, 1.0],
+        }
+    ]
 
-    y_train_pred = model.predict(X_train)
-    train_accuracy = accuracy_score(y_train, y_train_pred)
+    print("Parameter Grid:")
+    print(f"  max_depth: {param_grid[0]['max_depth']}")
+    print(f"  min_samples_split: {param_grid[0]['min_samples_split']}")
+    print(f"  max_features: {param_grid[0]['max_features']}")
+    print(f"  max_samples: {param_grid[0]['max_samples']}")
+    print()
 
-    print("Training Set Performance")
-    print(f"   Accuracy: {train_accuracy*100:.2f}%")
+    # GridSearchCV
+    model = RandomForestClassifier()
+    search = GridSearchCV(estimator=model, param_grid=param_grid, cv=3, verbose=1)
+    search.fit(x_train, y_train)
 
-    y_test_pred = model.predict(X_test)
-    test_accuracy = accuracy_score(y_test, y_test_pred)
+    print()
+    print("GRIDSEARCH COMPLETE")
+    print("Best Parameters:")
+    for param, value in search.best_params_.items():
+        print(f"  {param}: {value}")
+    print(f"\nBest CV Score: {search.best_score_*100:.2f}%")
 
-    print("Testing Set Performance")
-    print(f"   Accuracy: {test_accuracy*100:.2f}%")
+    return search
 
-    print("Running cross-validation")
-    cv_scores = cross_val_score(model, X_train, y_train, cv=5, scoring="accuracy")
 
-    print("Cross-Validation Performance")
-    print(f"   Mean Accuracy: {cv_scores.mean()*100:.2f}%")
-    print(f"   Standard Deviation: {cv_scores.std()*100:.2f}%")
+def analyze_results(search):
+    """
+    Analyzes and displays GridSearch results.
+    """
+    print()
+    print("STEP 6: ANALYZING RESULTS")
 
-    print("Overfitting Check")
-    overfit_gap = train_accuracy - test_accuracy
-    print(f"   Training Accuracy: {train_accuracy*100:.2f}%")
-    print(f"   Testing Accuracy: {test_accuracy*100:.2f}%")
-    print(f"   Difference: {overfit_gap*100:.2f}%")
+    # Create results DataFrame
+    results = pd.DataFrame(search.cv_results_)
+    results.sort_values("mean_test_score", inplace=True, ascending=False)
 
-    if overfit_gap < 0.05:
-        print("   Status: Model generalizes well")
-    elif overfit_gap < 0.10:
-        print("   Status: Acceptable overfitting")
-    else:
-        print("   Status: Significant overfitting detected")
+    # Display top 10
+    print()
+    print("Top 10 Parameter Combinations:")
+    top10 = results[
+        [
+            "mean_test_score",
+            "std_test_score",
+            "rank_test_score",
+            "param_max_depth",
+            "param_max_features",
+            "param_max_samples",
+            "param_min_samples_split",
+        ]
+    ].head(10)
+    print(top10.to_string(index=False))
+
+    return results
+
+
+def k_fold_validation(model, x, y):
+    """
+    Performs K-Fold Cross-Validation to validate model accuracy.
+    """
+    print()
+    print("STEP 7.5: K-FOLD CROSS-VALIDATION")
+
+    # Stratified K-Fold ensures balanced class distribution in each fold
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    cv_scores = cross_val_score(model, x, y, cv=skf, scoring="accuracy")
+
+    print()
+    print("Cross-Validation Results:")
+    print(f"  Fold Scores: {[f'{score:.4f}' for score in cv_scores]}")
+    print(f"  Mean Accuracy: {cv_scores.mean():.4f} ({cv_scores.mean()*100:.2f}%)")
+    print(f"  Standard Deviation: {cv_scores.std():.4f} (±{cv_scores.std()*100:.2f}%)")
+    print(f"  Min Accuracy: {cv_scores.min():.4f} ({cv_scores.min()*100:.2f}%)")
+    print(f"  Max Accuracy: {cv_scores.max():.4f} ({cv_scores.max()*100:.2f}%)")
+
+    return cv_scores
+
+
+def feature_importance_analysis(model, feature_columns):
+    """
+    Analyzes and displays feature importance.
+    """
+    print()
+    print("STEP 8: FEATURE IMPORTANCE ANALYSIS")
+
+    feature_importance = pd.DataFrame(
+        {"feature": feature_columns, "importance": model.feature_importances_}
+    ).sort_values("importance", ascending=False)
+
+    print()
+    print("Features Ranked by Importance:")
+    for rank, (idx, row) in enumerate(feature_importance.iterrows(), 1):
+        print(f"{rank}. {row['feature']}")
+
+    return feature_importance
 
 
 def save_model(model, output_path="models/random_forest_model.pkl"):
     """
-    Saves the trained model for use by app.py.
+    Saves the trained model.
     """
-    print("Saving model")
+    print()
+    print("STEP 9: SAVING MODEL")
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -222,35 +350,85 @@ def save_model(model, output_path="models/random_forest_model.pkl"):
     file_size = os.path.getsize(output_path) / 1024
     print(f"Model saved to: {output_path}")
     print(f"File size: {file_size:.2f} KB")
+    print("Model is ready for deployment!")
 
 
 def main():
     """
-    Main training pipeline using point-based risk assessment.
+    Main training pipeline matching notebook structure.
     """
-    print("Diabetic Risk Classification System - Model Training")
+    print()
+    print("Diabetic Patient Priority System")
 
     CSV_PATH = "Dabetics-dataset.csv"
 
     if not os.path.exists(CSV_PATH):
+        print()
         print(f"Error: Dataset not found at {CSV_PATH}")
-        print("Please place the Dabetics-dataset.csv file in this directory")
         return
 
-    print("Step 1: Loading and preprocessing data")
-    X, y, df = load_and_preprocess_data(CSV_PATH)
+    # Step 1: Load and preprocess
+    df = load_and_preprocess_data(CSV_PATH)
 
-    print("Step 2: Training Random Forest model")
-    model, X_train, X_test, y_train, y_test = train_random_forest(X, y)
+    # Step 2: Prepare features
+    x, y, feature_columns = prepare_features(df)
 
-    print("Step 3: Evaluating model performance")
-    evaluate_model(model, X_train, X_test, y_train, y_test)
+    # Step 3: Split data
+    x_train, x_test, y_train, y_test = split_data(x, y)
 
-    print("Step 4: Saving model")
-    save_model(model)
+    # Step 4: Train baseline model
+    print()
+    print("STEP 4: TRAINING BASELINE MODEL")
+    model = fit_and_evaluate_model(x_train, x_test, y_train, y_test)
 
-    print("Training complete")
-    print("Start the FastAPI service with: uvicorn app:app --reload --port 5000")
+    # Step 5: Hyperparameter tuning
+    search = hyperparameter_tuning(x_train, y_train)
+
+    # Step 6: Analyze results
+    results = analyze_results(search)
+
+    # Step 7: Evaluate best model on test set
+    print()
+    print("STEP 7: EVALUATING BEST MODEL ON TEST SET")
+    best_model = search.best_estimator_
+
+    y_pred_best = best_model.predict(x_test)
+    best_conf_matrix = confusion_matrix(y_test, y_pred_best)
+    best_accuracy = accuracy_score(y_test, y_pred_best)
+
+    print()
+    print("Confusion Matrix (Best Model):")
+    print(best_conf_matrix)
+    print()
+    print("Accuracy of Best Model:", best_accuracy * 100)
+    print()
+    print(classification_report(y_test, y_pred_best))
+
+    # Step 7.5: K-Fold Cross-Validation
+    cv_scores = k_fold_validation(best_model, x, y)
+
+    # Step 8: Feature importance
+    feature_importance = feature_importance_analysis(best_model, feature_columns)
+
+    # Step 9: Save model
+    save_model(best_model)
+
+    # Final summary
+    print()
+    print("=" * 60)
+    print("MODEL TRAINING COMPLETED")
+    print("=" * 60)
+    print()
+    print("Summary:")
+    print(f"  Test Set Accuracy: {best_accuracy*100:.2f}%")
+    print(
+        f"  Cross-Validation Accuracy: {cv_scores.mean()*100:.2f}% (±{cv_scores.std()*100:.2f}%)"
+    )
+    print()
+    print("Next Steps:")
+    print("  1. Use the saved model in your FastAPI application")
+    print("  2. Run: uvicorn app:app --reload --port 5000")
+    print()
 
 
 if __name__ == "__main__":
